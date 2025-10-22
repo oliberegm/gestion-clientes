@@ -1,0 +1,68 @@
+#version: '3.8'
+
+services:
+  # 1. SERVICIO DE LA APLICACIÓN SPRING BOOT (Backend)
+  app:
+    container_name: client-management-service
+    # La instrucción 'build' le indica a Docker que cree la imagen a partir del Dockerfile en la misma carpeta
+    build:
+      context: .
+      dockerfile: Dockerfile
+
+    # Carga las variables de entorno definidas en el archivo ..env
+    env_file:
+      - .env
+
+    # Mapea el puerto del contenedor (8080) al puerto de tu máquina local (8080)
+    ports:
+      - "8080:8080"
+
+    # Asegura que la app no inicie hasta que la DB y Rabbit estén listos
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+    # Sobrescribe el comando de inicio para forzar la activación del perfil 'local'
+    # Esto asegura que la configuración de logs en JSON solo se active en otros perfiles (dev, prod)
+    command: java -jar app.jar --spring.profiles.active=local
+
+  # 2. SERVICIO DE BASE DE DATOS (PostgreSQL)
+  postgres:
+    container_name: client-db
+    image: postgres:16-alpine
+    # Nota: Es crucial que estas variables coincidan con las de tu ..env
+    environment:
+      POSTGRES_USER: ${DB_USERNAME}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: clientdb
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    # Check de salud para el depends_on
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # 3. SERVICIO DE MENSAJERÍA (RabbitMQ)
+  rabbitmq:
+    container_name: rabbitmq-broker
+    image: rabbitmq:3-management-alpine # Incluye la interfaz de gestión web
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBIT_USERNAME}
+      RABBITMQ_DEFAULT_PASS: ${RABBIT_PASSWORD}
+    ports:
+      - "5672:5672" # Puerto estándar de AMQP
+      - "15672:15672" # Puerto para la interfaz de gestión web (http://localhost:15672)
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "check_port_connectivity"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:
